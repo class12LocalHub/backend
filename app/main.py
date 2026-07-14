@@ -2,7 +2,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import Base, engine
-from app.models import Post
+from app.models import Location, Post
+from app.routers.dashboard import router as dashboard_router
+from app.routers.locations import router as locations_router
 from app.routers.posts import router as posts_router
 
 
@@ -26,6 +28,8 @@ app.add_middleware(
 )
 
 app.include_router(posts_router)
+app.include_router(locations_router)
+app.include_router(dashboard_router)
 
 
 @app.get(

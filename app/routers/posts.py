@@ -5,6 +5,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.models.location import Location
 from app.models.post import Post
 from app.schemas.post import (
     PostCreateRequest,
@@ -33,6 +34,18 @@ def create_post(
     request: PostCreateRequest,
     db: Session = Depends(get_db),
 ) -> PostMessageResponse:
+    if request.location_id is not None:
+        location = db.get(Location, request.location_id)
+
+        if location is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={
+                    "code": "LOCATION_NOT_FOUND",
+                    "message": "선택한 장소를 찾을 수 없습니다.",
+                },
+            )
+
     post = Post(
         title=request.title,
         content=request.content,
@@ -113,13 +126,12 @@ def get_posts(
 
 @router.get(
     "/{post_id}",
-    response_model=PostResponse,
     summary="게시글 상세 조회",
 )
 def get_post(
     post_id: int,
     db: Session = Depends(get_db),
-) -> Post:
+) -> dict:
     post = db.get(Post, post_id)
 
     if post is None:
@@ -135,7 +147,34 @@ def get_post(
     db.commit()
     db.refresh(post)
 
-    return post
+    location = None
+
+    if post.location_id is not None:
+        location_row = db.get(Location, post.location_id)
+
+        if location_row is not None:
+            location = {
+                "id": location_row.id,
+                "name": location_row.name,
+                "category": location_row.category,
+                "address": location_row.address,
+                "latitude": location_row.latitude,
+                "longitude": location_row.longitude,
+                "thumbnail_url": location_row.thumbnail_url,
+            }
+
+    return {
+        "id": post.id,
+        "title": post.title,
+        "content": post.content,
+        "category": post.category,
+        "custom_tags": post.custom_tags,
+        "image_url": post.image_url,
+        "view_count": post.view_count,
+        "created_at": post.created_at,
+        "updated_at": post.updated_at,
+        "location": location,
+    }
 
 
 @router.put(
@@ -167,6 +206,18 @@ def update_post(
                 "message": "비밀번호가 일치하지 않습니다.",
             },
         )
+
+    if request.location_id is not None:
+        location = db.get(Location, request.location_id)
+
+        if location is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={
+                    "code": "LOCATION_NOT_FOUND",
+                    "message": "선택한 장소를 찾을 수 없습니다.",
+                },
+            )
 
     post.title = request.title
     post.content = request.content
