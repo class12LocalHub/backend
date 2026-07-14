@@ -127,11 +127,168 @@ GET /api/categories
 
 ---
 
-## 5. 지역정보 API
+## 5. 지도 시각화 API
 
-제공받은 서울 JSON 데이터를 조회하는 API다.
+Leaflet.js 기반 관광지·맛집 지도 핀 시각화와 권역 필터를 제공하는 API다. 핀 데이터는 `data/locations.json`을 그대로 조회해 사용한다.
 
-### 5.1 지역정보 목록 조회
+### 5.1 지도 핀 목록 조회
+
+```http
+GET /api/map/pois
+```
+
+#### Query Parameter
+
+| 이름 | 타입 | 필수 | 기본값 | 설명 |
+|---|---|---:|---:|---|
+| `place_type` | string | X | `all` | `all`, `tourist`, `restaurant` 중 하나 |
+| `category` | string | X | 전체 | 세부 카테고리 필터 |
+| `keyword` | string | X | 없음 | 장소명·주소·태그 검색 |
+| `region` | string | X | 전체 | 권역 필터 |
+| `bbox` | string | X | 없음 | 현재 지도 영역 `minLng,minLat,maxLng,maxLat` |
+| `page` | integer | X | 1 | 현재 페이지 |
+| `size` | integer | X | 20 | 한 페이지 개수 |
+
+#### 요청 예시
+
+```http
+GET /api/map/pois?place_type=tourist&region=서울&bbox=126.85,37.45,127.10,37.60&page=1&size=20
+```
+
+#### 응답 예시
+
+```json
+{
+  "items": [
+    {
+      "id": 2611482,
+      "name": "150년 수령 느티나무",
+      "category": "관광지",
+      "address": "서울특별시 양천구 목동중앙본로1길 37 (목동)",
+      "summary": "150년 수령 느티나무은(는) 관광지에 속하는 서울 지역정보입니다.",
+      "description": "150년 수령 느티나무 관련 관광지 정보입니다. 주소: 서울특별시 양천구 목동중앙본로1길 37 (목동).",
+      "telephone": null,
+      "homepage": null,
+      "latitude": 37.5376778592,
+      "longitude": 126.8687762819,
+      "region": "서울",
+      "place_type": "tourist",
+      "firstimage2": "http://tong.visitkorea.or.kr/cms/resource/57/3396257_image3_1.JPG"
+    }
+  ],
+  "total": 6518,
+  "page": 1,
+  "size": 20,
+  "total_pages": 326
+}
+```
+
+좌표가 JSON에 없으면 해당 항목은 목록에서 제외한다. 현재 구현은 지도에 찍을 수 있는 항목만 반환한다.
+
+#### 프론트엔드 사용 위치
+
+- Leaflet 지도 핀 표시
+- 관광지·맛집 목록 패널
+- 권역 필터 버튼
+- 현재 지도 영역 재조회
+
+---
+
+### 5.2 지도 핀 상세 조회
+
+```http
+GET /api/map/pois/{poi_id}
+```
+
+#### 요청 예시
+
+```http
+GET /api/map/pois/2611482
+```
+
+#### 응답 예시
+
+```json
+{
+  "id": 2611482,
+  "name": "150년 수령 느티나무",
+  "category": "관광지",
+  "address": "서울특별시 양천구 목동중앙본로1길 37 (목동)",
+  "summary": "150년 수령 느티나무은(는) 관광지에 속하는 서울 지역정보입니다.",
+  "description": "150년 수령 느티나무 관련 관광지 정보입니다. 주소: 서울특별시 양천구 목동중앙본로1길 37 (목동).",
+  "telephone": null,
+  "homepage": null,
+  "latitude": 37.5376778592,
+  "longitude": 126.8687762819,
+  "region": "서울",
+  "place_type": "tourist",
+  "firstimage": "http://tong.visitkorea.or.kr/cms/resource/57/3396257_image2_1.JPG",
+  "firstimage2": "http://tong.visitkorea.or.kr/cms/resource/57/3396257_image3_1.JPG",
+  "source": "TourAPI 4.0 원본 데이터",
+  "source_region": "서울",
+  "source_contentid": "2611482",
+  "source_contenttypeid": "12",
+  "source_contenttype": "관광지",
+  "zipcode": "07961",
+  "createdtime": "20190717201103",
+  "modifiedtime": "20250319191708",
+  "mlevel": "6",
+  "cpyrhtDivCd": "Type3",
+  "areacode": "1",
+  "sigungucode": "19",
+  "lDongRegnCd": "11",
+  "lDongSignguCd": "470",
+  "cat1": "A01",
+  "cat2": "A0102",
+  "cat3": "A01020100",
+  "lclsSystm1": "NA",
+  "lclsSystm2": "NA03",
+  "lclsSystm3": "NA030200"
+}
+```
+
+`source_contentid`, `createdtime`, `modifiedtime`, 이미지, 코드 값 등은 원본 JSON에 존재하는 값이면 그대로 반환한다.
+
+#### 프론트엔드 사용 위치
+
+- 지도 핀 클릭 상세 팝업
+- 장소 정보 사이드 패널
+
+---
+
+### 5.3 지도 필터 목록 조회
+
+```http
+GET /api/map/filters
+```
+
+#### 응답 예시
+
+```json
+{
+  "place_types": [
+    { "value": "all", "label": "전체" },
+    { "value": "tourist", "label": "관광지" },
+    { "value": "restaurant", "label": "맛집" }
+  ],
+  "regions": ["서울"],
+  "categories": ["관광지", "레포츠", "문화시설", "쇼핑", "숙박", "여행코스", "축제공연행사"]
+}
+```
+
+#### 프론트엔드 사용 위치
+
+- 지도 필터 드롭다운
+- 권역 버튼 그룹
+- 관광지/맛집 토글
+
+---
+
+## 6. 지역정보 API
+
+지도 기능 외에 지역정보를 별도로 조회할 때 사용하는 API다.
+
+### 6.1 지역정보 목록 조회
 
 ```http
 GET /api/locations
@@ -158,19 +315,19 @@ GET /api/locations?category=관광지&keyword=한강&page=1&size=20
 {
   "items": [
     {
-      "id": 15,
-      "name": "한강공원",
+      "id": 2611482,
+      "name": "150년 수령 느티나무",
       "category": "관광지",
-      "address": "서울특별시 영등포구 여의동로 330",
-      "summary": "한강을 따라 산책과 휴식을 즐길 수 있는 공원입니다.",
-      "latitude": 37.5284,
-      "longitude": 126.9348
+      "address": "서울특별시 양천구 목동중앙본로1길 37 (목동)",
+      "summary": "150년 수령 느티나무은(는) 관광지에 속하는 서울 지역정보입니다.",
+      "latitude": 37.5376778592,
+      "longitude": 126.8687762819
     }
   ],
-  "total": 1,
+  "total": 783,
   "page": 1,
   "size": 20,
-  "total_pages": 1
+  "total_pages": 40
 }
 ```
 
@@ -185,7 +342,7 @@ GET /api/locations?category=관광지&keyword=한강&page=1&size=20
 
 ---
 
-### 5.2 지역정보 상세 조회
+### 6.2 지역정보 상세 조회
 
 ```http
 GET /api/locations/{location_id}
@@ -194,25 +351,25 @@ GET /api/locations/{location_id}
 #### 요청 예시
 
 ```http
-GET /api/locations/15
+GET /api/locations/2611482
 ```
 
 #### 응답 예시
 
 ```json
 {
-  "id": 15,
-  "name": "한강공원",
+  "id": 2611482,
+  "name": "150년 수령 느티나무",
   "category": "관광지",
-  "address": "서울특별시 영등포구 여의동로 330",
-  "description": "한강을 따라 산책, 자전거, 휴식을 즐길 수 있는 공간입니다.",
-  "telephone": "02-0000-0000",
-  "homepage": "https://example.com",
-  "latitude": 37.5284,
-  "longitude": 126.9348,
+  "address": "서울특별시 양천구 목동중앙본로1길 37 (목동)",
+  "description": "150년 수령 느티나무 관련 관광지 정보입니다. 주소: 서울특별시 양천구 목동중앙본로1길 37 (목동).",
+  "telephone": null,
+  "homepage": null,
+  "latitude": 37.5376778592,
+  "longitude": 126.8687762819,
   "start_date": null,
   "end_date": null,
-  "source": "제공 JSON 데이터"
+  "source": "TourAPI 4.0 원본 데이터"
 }
 ```
 
