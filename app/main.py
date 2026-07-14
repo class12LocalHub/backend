@@ -1,34 +1,42 @@
-from __future__ import annotations
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import Base, engine
-from app.routers import auth, items
+from app.models import Post
+from app.routers.items import router as items_router
+from app.routers.posts import router as posts_router
 
 
-app = FastAPI(title="LocalHub API")
+Base.metadata.create_all(bind=engine)
 
-app.add_middleware(
-	CORSMiddleware,
-	allow_origins=["*"],
-	allow_credentials=True,
-	allow_methods=["*"],
-	allow_headers=["*"],
+app = FastAPI(
+    title="LocalHub API",
+    description="서울 공공데이터 기반 지역 정보 공유 커뮤니티 API",
+    version="0.1.0",
 )
 
-app.include_router(items.router)
-app.include_router(auth.router)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(posts_router)
+app.include_router(items_router)
 
 
-@app.on_event("startup")
-async def startup() -> None:
-	async with engine.begin() as conn:
-		await conn.run_sync(Base.metadata.create_all)
-	# TODO: load seed_locations.json and seed_posts.json here.
-
-
-@app.get("/api/health")
-async def health() -> dict[str, str]:
-	return {"status": "ok", "service": "LocalHub API"}
-
+@app.get(
+    "/api/health",
+    tags=["System"],
+    summary="서버 상태 확인",
+)
+def health_check() -> dict[str, str]:
+    return {
+        "status": "ok",
+        "service": "LocalHub API",
+    }

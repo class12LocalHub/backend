@@ -1,54 +1,92 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import APIRouter, HTTPException, status
 
-from app.database import get_db
+from app.crud import get_dashboard_stats, get_location, get_map_filters, list_locations
+from app.schemas.location import DashboardResponse, LocationListResponse, MapFiltersResponse, MapPoiDetail, MapPoiListResponse
 
 
 router = APIRouter(prefix="/api", tags=["items"])
 
 
 @router.get("/map/pois")
-async def list_map_pois(
+def list_map_pois(
+	place_type: str | None = "all",
 	category: str | None = None,
 	keyword: str | None = None,
 	region: str | None = None,
 	bbox: str | None = None,
 	page: int = 1,
 	size: int = 20,
-	db: AsyncSession = Depends(get_db),
-):
-	raise NotImplementedError
+) -> MapPoiListResponse:
+	items, total, total_pages = list_locations(
+		place_type=place_type,
+		category=category,
+		keyword=keyword,
+		region=region,
+		bbox=bbox,
+		page=page,
+		size=size,
+	)
+	return MapPoiListResponse(items=items, total=total, page=page, size=size, total_pages=total_pages)
 
 
 @router.get("/map/pois/{poi_id}")
-async def get_map_poi(poi_id: int, db: AsyncSession = Depends(get_db)):
-	raise NotImplementedError
+def get_map_poi(poi_id: int) -> MapPoiDetail:
+	location = get_location(poi_id)
+	if location is None:
+		raise HTTPException(
+			status_code=status.HTTP_404_NOT_FOUND,
+			detail={
+				"code": "LOCATION_NOT_FOUND",
+				"message": "지역정보를 찾을 수 없습니다.",
+			},
+		)
+	return MapPoiDetail.model_validate(location)
 
 
 @router.get("/map/filters")
-async def get_map_filters(db: AsyncSession = Depends(get_db)):
-	raise NotImplementedError
+def get_map_filters_api() -> MapFiltersResponse:
+	return MapFiltersResponse.model_validate(get_map_filters())
 
 
 @router.get("/locations")
-async def list_locations_api(
+def list_locations_api(
+	place_type: str | None = "all",
 	category: str | None = None,
 	keyword: str | None = None,
 	page: int = 1,
 	size: int = 20,
-	db: AsyncSession = Depends(get_db),
-):
-	raise NotImplementedError
+	region: str | None = None,
+	bbox: str | None = None,
+) -> LocationListResponse:
+	items, total, total_pages = list_locations(
+		place_type=place_type,
+		category=category,
+		keyword=keyword,
+		region=region,
+		bbox=bbox,
+		page=page,
+		size=size,
+	)
+	return LocationListResponse(items=items, total=total, page=page, size=size, total_pages=total_pages)
 
 
 @router.get("/locations/{location_id}")
-async def get_location_api(location_id: int, db: AsyncSession = Depends(get_db)):
-	raise NotImplementedError
+def get_location_api(location_id: int) -> MapPoiDetail:
+	location = get_location(location_id)
+	if location is None:
+		raise HTTPException(
+			status_code=status.HTTP_404_NOT_FOUND,
+			detail={
+				"code": "LOCATION_NOT_FOUND",
+				"message": "지역정보를 찾을 수 없습니다.",
+			},
+		)
+	return MapPoiDetail.model_validate(location)
 
 
 @router.get("/dashboard")
-async def dashboard_api(db: AsyncSession = Depends(get_db)):
-	raise NotImplementedError
+def dashboard_api() -> DashboardResponse:
+	return DashboardResponse.model_validate(get_dashboard_stats())
 
