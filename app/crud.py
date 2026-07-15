@@ -273,15 +273,7 @@ def get_dashboard_stats() -> dict[str, Any]:
 		],
 	}
 
-단 하나의 테스트 게시물을 타깃으로 삼아 정확히 비교 분석할 수 있도록 로그를 대폭 업그레이드했습니다.
 
-실제 DB에 저장된 테스트용 1번 게시물의 원본 데이터(title, category, custom_tags)와 현재 사용자의 검색 조건(keyword, category_id)을 터미널 콘솔창에 양옆으로 배치하여, 어디가 일치하고 어디가 불일치하는지 눈으로 즉시 확인할 수 있는 비교 로그를 추가했습니다.
-
-🛠️ 데이터 비교 로그가 추가된 search_posts_from_db 전체 코드
-Python
-from sqlalchemy.orm import Session
-from sqlalchemy import or_
-from app.models.post import Post
 
 def search_posts_from_db(
     db: Session, 
