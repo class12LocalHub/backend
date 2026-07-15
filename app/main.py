@@ -1,9 +1,12 @@
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from app.database import Base, engine
-
 from app.models import Location, Post
 from app.routers.categories import router as categories_router
 from app.routers.chat import router as chat_router
@@ -13,7 +16,9 @@ from app.routers.locations import router as locations_router
 from app.routers.posts import router as posts_router
 
 
+# SQLAlchemy가 모든 모델을 인식한 뒤 테이블을 생성한다.
 Base.metadata.create_all(bind=engine)
+
 settings = get_settings()
 
 app = FastAPI(
@@ -31,8 +36,11 @@ app.add_middleware(
 )
 
 app.include_router(posts_router)
-# 정적 경로를 동적 /api/locations/{location_id}보다 먼저 등록한다.
+
+# /api/locations/suggestions 같은 정적 경로가
+# /api/locations/{location_id}보다 먼저 등록되도록 유지한다.
 app.include_router(locations_router)
+
 app.include_router(items_router)
 app.include_router(dashboard_router)
 app.include_router(categories_router)
