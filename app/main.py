@@ -1,14 +1,15 @@
+from dotenv import load_dotenv
+load_dotenv()
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-
 from app.database import Base, engine
-
 from app.routers.items import router as items_router
 from app.models import Location, Post
 from app.routers.dashboard import router as dashboard_router
 from app.routers.locations import router as locations_router
 from app.routers.posts import router as posts_router
-
+from app.routers.chat import router as chat_router
 
 Base.metadata.create_all(bind=engine)
 
@@ -33,7 +34,7 @@ app.include_router(posts_router)
 app.include_router(items_router)
 app.include_router(locations_router)
 app.include_router(dashboard_router)
-
+app.include_router(chat_router)
 
 @app.get(
     "/api/health",

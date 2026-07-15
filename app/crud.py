@@ -5,6 +5,9 @@ from functools import lru_cache
 from math import ceil
 from pathlib import Path
 from typing import Any
+from sqlalchemy import or_
+from sqlalchemy.orm import Session
+from app.models.post import Post
 
 
 DATA_FILE = Path(__file__).resolve().parents[1] / "data" / "locations.json"
@@ -269,4 +272,28 @@ def get_dashboard_stats() -> dict[str, Any]:
 			if category in category_counts
 		],
 	}
+
+def search_posts_from_db(
+    db: Session, 
+    *, 
+    keyword: str | None = None, 
+    category_id: str | None = None, 
+    limit: int = 4
+) -> list[Post]:
+    query = db.query(Post)
+    
+    # 1. 카테고리 필터링
+    if category_id:
+        query = query.filter(Post.category == category_id)
+        
+    # 2. 제목(title) 또는 태그(custom_tags)만 매칭 (본문은 과감히 제외!)
+    if keyword:
+        query = query.filter(
+            or_(
+                Post.title.contains(keyword),
+                Post.custom_tags.contains(keyword)  # JSON 타입 검색 지원
+            )
+        )
+        
+    return query.order_by(Post.created_at.desc()).limit(limit).all()
 
