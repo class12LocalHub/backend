@@ -1,7 +1,7 @@
-import json
+# app/services/chat.py
 import os
-
-from dotenv import load_dotenv
+import json
+import random
 from openai import AsyncOpenAI
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
@@ -10,9 +10,9 @@ from app.crud import list_locations
 from app.models.post import Post
 from app.schemas.chat import ChatMessage, ChatResponse, ChatSource
 
-
+# 환경변수 로드
+from dotenv import load_dotenv
 load_dotenv()
-
 
 SUPPORTED_CATEGORIES = [
     "관광지",
@@ -170,7 +170,7 @@ async def analyze_intent_with_ai(
         return json.loads(raw_content)
     except Exception as e:
         print(f"[의도 분석 실패]: {e}")
-        return {"intent": "direct", "category_id": None, "keyword": None}
+        return {"intent": "direct", "category": None, "keyword": None}
 
 
 def _search_posts(
@@ -188,7 +188,6 @@ def _search_posts(
         )
 
     if keyword:
-        # 사용자가 직접 입력한 custom_tags는 검색에 포함하지 않는다.
         stmt = stmt.where(
             or_(
                 Post.title.contains(keyword),
@@ -371,7 +370,8 @@ async def generate_chat_response(
         or _extract_keyword(user_last_message)
     )
 
-    print(f"[CHAT] intent={intent}, category_id={category_id!r}, keyword={keyword!r}")
+    # 버그 수정: 이전에 정의되지 않은 category_id -> category로 수정
+    print(f"[CHAT] intent={intent}, category={category!r}, keyword={keyword!r}")
 
     local_context = ""
     data: list = []
@@ -449,6 +449,7 @@ async def generate_chat_response(
     else:
         query_type = "general"
 
+    # API 키가 없거나 비활성 상태이면 가차 없이 Fallback 응답으로 선제 방어
     if openai_client is None:
         return _fallback_response(
             user_message=user_last_message,
@@ -458,15 +459,21 @@ async def generate_chat_response(
             sources=sources,
         )
 
+    # 안전하게 구조화된 system_instruction 작성
     system_instruction = """
-너는 서울 지역정보 커뮤니티 LocalHub의 AI 가이드다.
+너는 서울 및 지역 관광 커뮤니티인 'LocalHub'의 AI 가이드야.
+답변 규칙:
+1. 답변은 최대 5줄 이내로, 불필요한 장문 설명은 절대 하지 마.
+2. 추천은 핵심만 간단히 정리하고, 각 항목은 1~2줄로 써.
+3. 리스트는 최대 4개까지만 보여줘.
 
-규칙:
-1. 답변은 핵심만 간결하게 작성한다.
-2. 최대 4개까지만 추천한다.
-3. 제공된 지역정보와 게시글 내용을 우선 사용한다.
-4. 제공되지 않은 장소의 주소나 운영시간을 지어내지 않는다.
-5. 커뮤니티 게시글은 사용자가 작성한 후기라는 점을 명확히 한다.
+■ 질문이 [커뮤니티 게시글]을 찾는 의도인 경우 (posts):
+- 주어지는 [연관 커뮤니티 게시글]을 바탕으로 관련 글을 짧게 요약해줘.
+- 게시글 데이터가 없다면 다른 가상 정보를 유추하지 말고, 단호하게 '현재 게시판에 관련 게시글이 없습니다.'라고만 답해줘.
+
+■ 질문이 [장소 추천/정보]를 찾는 의도인 경우 (locations):
+- 주어지는 [LocalHub 서울 장소 데이터]가 있으면 이름, 주소, 한줄 소개만 간단히 요약해줘.
+- 장소 데이터가 없다면 해당 지역/주제에 대해 네가 알고 있는 범위에서 자연스럽고 짧게 어드바이스를 해줘.
 """.strip()
 
     api_messages = [
@@ -493,122 +500,26 @@ async def generate_chat_response(
         )
 
     try:
-        # 2-1. 의도 1: 게시글 검색 (posts)
-        if intent == "posts":
-            posts = search_posts_from_db(db, keyword=keyword, category_id=category_id)
-            fallback_data = posts # fallback 대비용 데이터 저장
-            print(f"[CHAT] posts_found={len(posts)}, keyword={keyword!r}, category_id={category_id!r}")
-            if posts:
-                print("[CHAT] posts_result=" + ", ".join(f"{post.id}:{post.title}" for post in posts))
-                context_lines = ["[연관 커뮤니티 게시글 검색 결과]"]
-                for idx, post in enumerate(posts, 1):
-                    # 카테고리 ID 역매핑하여 이름 획득
-                    cat_name = next((k for k, v in CATEGORY_CODES.items() if v == post.category), "일반")
-                    context_lines.append(
-                        f"게시글 {idx}. 제목: {post.title} | 게시판: {cat_name}\n"
-                        f"   - 본문 요약: {post.content[:150]}..."
-                    )
-                local_context = "\n".join(context_lines)
-
-        # 2-2. 의도 2: 장소 추천 (locations)
-        elif intent == "locations":
-            # TourAPI JSON 데이터 카테고리 매핑용 역변환
-            cat_name = next((k for k, v in CATEGORY_CODES.items() if v == category_id), None)
-            locations, _, _ = list_locations(category=cat_name, keyword=keyword, size=4)
-            fallback_data = locations
-            print(
-                f"[CHAT] locations_found={len(locations)}, keyword={keyword!r}, category_id={category_id!r}, mapped_category={cat_name!r}"
-            )
-            if locations:
-                print("[CHAT] locations_result=" + ", ".join(f"{loc.get('id')}:{loc.get('name')}" for loc in locations))
-                context_lines = ["[추천 장소 정보 데이터]"]
-                for idx, loc in enumerate(locations, 1):
-                    context_lines.append(
-                        f"장소 {idx}. 명칭: {loc.get('name')} | 분류: {loc.get('category')} | 주소: {loc.get('address')}\n"
-                        f"   - 설명: {loc.get('summary') or loc.get('description') or '정보 없음'}"
-                    )
-                local_context = "\n".join(context_lines)
-
-        # 2-3. 의도 3: 기타 (direct)
-        # 별도 DB 조회를 거치지 않고 prompt에 빈 값을 주어 GPT가 다이렉트로 답변하게 유도합니다.
-        else:
-            local_context = ""
-
-        # 3. GPT-4o-mini 호출
-        system_instruction = (
-            "너는 서울 및 지역 관광 커뮤니티인 'LocalHub'의 AI 가이드야.\n"
-            "답변 규칙:\n"
-            "1. 답변은 최대 5줄, 불필요한 장문 설명은 하지 마.\n"
-            "2. 추천은 핵심만 간단히 정리하고, 각 항목은 1~2줄로 써.\n"
-            "3. 리스트는 최대 4개까지만 보여줘.\n"
-            "[연관 커뮤니티 게시글 검색 결과]가 있으면 관련 글을 짧게 요약해줘.\n"
-            "게시글 데이터가 없다면 그냥 현재 게시판에 관련 게시글이 없다고 말해줘.\n"
-            "[추천 장소 정보 데이터]가 있으면 이름, 주소, 한줄 소개만 간단히 보여줘.\n"
-            "장소 데이터가 없다변 해당 지역/주제에 대해 네가 아는 범위에서 짧고 자연스럽게 안내해줘.\n"
-        )
-
-        if not response.choices:
-            raise ValueError(
-                "OpenAI 응답 choice가 없습니다."
-            )
-
-        answer = (
-            response.choices[0]
-            .message.content
-            or ""
-        ).strip()
-
+        # GPT-5-mini 호출 (중복 제거 및 완전 정교화)
         response = await openai_client.chat.completions.create(
-            model="gpt-5-mini",
+            model=OPENAI_MODEL,
             messages=api_messages,
             response_format={"type": "text"},
-            max_completion_tokens=2500
+            max_completion_tokens=1500
         )
-        first_choice = response.choices[0] if response.choices else None
-        raw_message = first_choice.message if first_choice else None
+        
         answer = (response.choices[0].message.content or "").strip()
+        
         if not answer:
             print("[OpenAI API 경고] 빈 응답이 반환되어 fallback으로 전환합니다.")
-            return generate_fallback_response(user_last_message, intent, fallback_data)
-        return answer
-
-    except Exception as openai_error:
-        # 4. Fallback 작동: API 문제 발생 시 자체 조합 텍스트 제공
-        print(f"[OpenAI API 에러 - Fallback 실행]: {openai_error}")
-        return generate_fallback_response(user_last_message, intent, fallback_data)
-
-
-def generate_fallback_response(user_message: str, intent: str, data: list) -> str:
-    """
-    OpenAI API 실패 시 데이터를 직접 조합하여 마크다운 형태로 답변을 빌드합니다.
-    """
-    intro = "시스템 점검 중이어서 DB 기준으로 간단히 안내드릴게요.\n\n"
-    
-    if not data:
-        return intro + f"'{user_message}'와(과) 관련된 정보를 매칭해 보았지만, 적절한 데이터가 검색되지 않았습니다. 😢"
-
-    results = []
-    
-    # 게시글 Fallback 포맷팅
-    if intent == "posts":
-        results.append("🔍 **연관된 인기 커뮤니티 게시글들을 찾았습니다:**\n")
-        for idx, post in enumerate(data, 1):
-            results.append(
-                f"### {idx}. {post.title}\n"
-                f"- 📝 내용: {post.content[:150]}...\n"
-                f"- 🕒 등록일: {post.created_at.strftime('%Y-%m-%d')}\n"
+            return _fallback_response(
+                user_message=user_last_message,
+                intent=intent,
+                data=data,
+                query_type=query_type,
+                sources=sources,
             )
             
-    # 장소 Fallback 포맷팅
-    else:
-        results.append("📍 **추천드릴 만한 가볼 만한 곳 리스트입니다:**\n")
-        for idx, loc in enumerate(data, 1):
-            results.append(
-                f"### {idx}. {loc.get('name')} ({loc.get('category', '관광지')})\n"
-                f"- 📍 주소: {loc.get('address', '주소 미제공')}\n"
-                f"- ✍️ 소개: {loc.get('summary') or loc.get('description') or '상세 설명 정보가 부족합니다.'}\n"
-            )
-
         return ChatResponse(
             answer=answer,
             query_type=query_type,
@@ -616,10 +527,7 @@ def generate_fallback_response(user_message: str, intent: str, data: list) -> st
         )
 
     except Exception as error:
-        print(
-            f"[OpenAI 응답 실패 - fallback]: {error}"
-        )
-
+        print(f"[OpenAI 응답 실패 - fallback]: {error}")
         return _fallback_response(
             user_message=user_last_message,
             intent=intent,
@@ -627,3 +535,21 @@ def generate_fallback_response(user_message: str, intent: str, data: list) -> st
             query_type=query_type,
             sources=sources,
         )
+
+
+def generate_fallback_response(
+    user_message: str, 
+    intent: str, 
+    data: list
+) -> str:
+    """
+    이전 하위 호환성 유지용 임시 텍스트 반환 래퍼
+    """
+    resp = _fallback_response(
+        user_message=user_message,
+        intent=intent,
+        data=data,
+        query_type="fallback",
+        sources=[]
+    )
+    return resp.answer
