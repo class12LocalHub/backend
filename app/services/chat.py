@@ -60,7 +60,8 @@ async def analyze_intent_with_ai(user_message: str) -> dict:
             ],
             response_format={"type": "json_object"}
         )
-        return json.loads(response.choices[0].message.content)
+        raw_content = response.choices[0].message.content if response.choices else None
+        return json.loads(raw_content)
     except Exception as e:
         print(f"[의도 분석 실패]: {e}")
         return {"intent": "direct", "category_id": None, "keyword": None}
@@ -75,6 +76,8 @@ async def generate_chat_response(messages: List[ChatMessage], db: Session) -> st
     category_id = analysis.get("category_id")
     keyword = analysis.get("keyword") or user_last_message
 
+    print(f"[CHAT] intent={intent}, category_id={category_id!r}, keyword={keyword!r}")
+
     local_context = ""
     fallback_data = []
 
@@ -83,7 +86,9 @@ async def generate_chat_response(messages: List[ChatMessage], db: Session) -> st
         if intent == "posts":
             posts = search_posts_from_db(db, keyword=keyword, category_id=category_id)
             fallback_data = posts # fallback 대비용 데이터 저장
+            print(f"[CHAT] posts_found={len(posts)}, keyword={keyword!r}, category_id={category_id!r}")
             if posts:
+                print("[CHAT] posts_result=" + ", ".join(f"{post.id}:{post.title}" for post in posts))
                 context_lines = ["[연관 커뮤니티 게시글 검색 결과]"]
                 for idx, post in enumerate(posts, 1):
                     # 카테고리 ID 역매핑하여 이름 획득
@@ -100,7 +105,11 @@ async def generate_chat_response(messages: List[ChatMessage], db: Session) -> st
             cat_name = next((k for k, v in CATEGORY_CODES.items() if v == category_id), None)
             locations, _, _ = list_locations(category=cat_name, keyword=keyword, size=4)
             fallback_data = locations
+            print(
+                f"[CHAT] locations_found={len(locations)}, keyword={keyword!r}, category_id={category_id!r}, mapped_category={cat_name!r}"
+            )
             if locations:
+                print("[CHAT] locations_result=" + ", ".join(f"{loc.get('id')}:{loc.get('name')}" for loc in locations))
                 context_lines = ["[추천 장소 정보 데이터]"]
                 for idx, loc in enumerate(locations, 1):
                     context_lines.append(
@@ -116,11 +125,14 @@ async def generate_chat_response(messages: List[ChatMessage], db: Session) -> st
 
         # 3. GPT-4o-mini 호출
         system_instruction = (
-            "너는 서울 및 지역 관광 커뮤니티인 'LocalHub'의 만능 AI 가이드야.\n"
-            "상황에 맞춰 아래 지침에 따라 답변해줘:\n\n"
-            "- [연관 커뮤니티 게시글 검색 결과]가 주어지면, '저희 커뮤니티 유저분들이 남겨주신 관련 게시글입니다'라며 정보를 친절히 요약 및 소개해줘.\n"
-            "- [추천 장소 정보 데이터]가 주어지면, 실제 데이터베이스에 있는 정확한 명칭과 주소, 소개를 바탕으로 사용자에게 적극 추천해줘.\n"
-            "- 아무 데이터도 주어지지 않았거나 일반 질문인 경우(기타), 네가 가지고 있는 지식을 활용하여 서울 관광, 맛집 위치, 팁 등을 자유롭고 친절하게 대답해줘."
+            "너는 서울 및 지역 관광 커뮤니티인 'LocalHub'의 AI 가이드야.\n"
+            "답변 규칙:\n"
+            "1. 답변은 최대 5줄, 불필요한 장문 설명은 하지 마.\n"
+            "2. 추천은 핵심만 간단히 정리하고, 각 항목은 1~2줄로 써.\n"
+            "3. 리스트는 최대 4개까지만 보여줘.\n"
+            "[연관 커뮤니티 게시글 검색 결과]가 있으면 관련 글을 짧게 요약해줘.\n"
+            "[추천 장소 정보 데이터]가 있으면 이름, 주소, 한줄 소개만 간단히 보여줘.\n"
+            "데이터가 없으면 서울 기준으로 짧게 안내해줘."
         )
 
         api_messages = [{"role": "system", "content": system_instruction}]
@@ -133,18 +145,10 @@ async def generate_chat_response(messages: List[ChatMessage], db: Session) -> st
             model="gpt-5-mini",
             messages=api_messages,
             response_format={"type": "text"},
-            max_completion_tokens=1000
+            max_completion_tokens=2500
         )
         first_choice = response.choices[0] if response.choices else None
         raw_message = first_choice.message if first_choice else None
-        print(
-            "[OpenAI RAW RESPONSE]",
-            f"model={getattr(response, 'model', None)!r}",
-            f"finish_reason={getattr(first_choice, 'finish_reason', None)!r}",
-            f"content={getattr(raw_message, 'content', None)!r}",
-            f"refusal={getattr(raw_message, 'refusal', None)!r}",
-            f"tool_calls={getattr(raw_message, 'tool_calls', None)!r}",
-        )
         answer = (response.choices[0].message.content or "").strip()
         if not answer:
             print("[OpenAI API 경고] 빈 응답이 반환되어 fallback으로 전환합니다.")
@@ -161,7 +165,7 @@ def generate_fallback_response(user_message: str, intent: str, data: list) -> st
     """
     OpenAI API 실패 시 데이터를 직접 조합하여 마크다운 형태로 답변을 빌드합니다.
     """
-    intro = "현재 AI 가이드 시스템 점검 중으로, 데이터베이스 내에서 일치하는 정보를 바로 매칭해 드립니다! 🗺️\n\n"
+    intro = "시스템 점검 중이어서 DB 기준으로 간단히 안내드릴게요.\n\n"
     
     if not data:
         return intro + f"'{user_message}'와(과) 관련된 정보를 매칭해 보았지만, 적절한 데이터가 검색되지 않았습니다. 😢"
