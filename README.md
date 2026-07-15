@@ -148,3 +148,58 @@ backend
    └─ __init__.py
 
 ```
+
+```
+backend
+├─ .python-version
+├─ app
+│  ├─ config.py
+│  ├─ crud.py
+│  ├─ database.py
+│  ├─ main.py
+│  ├─ models
+│  │  ├─ location.py
+│  │  ├─ post.py
+│  │  └─ __init__.py
+│  ├─ routers
+│  │  ├─ categories.py
+│  │  ├─ chat.py
+│  │  ├─ dashboard.py
+│  │  ├─ items.py
+│  │  ├─ locations.py
+│  │  ├─ map.py
+│  │  ├─ posts.py
+│  │  └─ __init__.py
+│  ├─ schemas
+│  │  ├─ chat.py
+│  │  ├─ location.py
+│  │  ├─ post.py
+│  │  └─ __init__.py
+│  ├─ services
+│  │  └─ chat.py
+│  └─ __init__.py
+├─ BACKEND_P0_FE_FIX_REPORT.md
+├─ build.sh
+├─ data
+│  ├─ locations.json
+│  └─ raw
+│     ├─ 서울_관광지.json
+│     ├─ 서울_레포츠.json
+│     ├─ 서울_문화시설.json
+│     ├─ 서울_쇼핑.json
+│     ├─ 서울_숙박.json
+│     ├─ 서울_여행코스.json
+│     └─ 서울_축제공연행사.json
+├─ LocalHub_API_명세서_초안_v0.1.md
+├─ README.md
+├─ requirements.txt
+├─ scripts
+│  ├─ seed_locations.py
+│  ├─ seed_posts.py
+│  └─ __init__.py
+├─ start.sh
+└─ tests
+   ├─ test_smoke.py
+   └─ __init__.py
+
+```
