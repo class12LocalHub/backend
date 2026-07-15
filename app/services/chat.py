@@ -104,7 +104,7 @@ async def generate_chat_response(messages: List[ChatMessage], db: Session) -> st
     try:
         # 2-1. 의도 1: 게시글 검색 (posts)
         if intent == "posts":
-            # 💡 [수정] AI가 뽑아준 카테고리 코드("12")를 DB에 저장된 한글 카테고리명("관광지")으로 변환합니다.
+            # 💡 AI가 뽑아준 카테고리 코드("12")를 DB에 저장된 한글 카테고리명("관광지")으로 변환합니다.
             db_category_name = None
             if category_id:
                 # CATEGORY_CODES를 역으로 추적하여 한글 키값을 찾습니다.
@@ -113,7 +113,7 @@ async def generate_chat_response(messages: List[ChatMessage], db: Session) -> st
             # DB 조회 시 category_id 파라미터에 한글 카테고리명(db_category_name)을 전달합니다.
             posts = search_posts_from_db(db, keyword=keyword, category_id=db_category_name)
             
-            fallback_data = posts # fallback 대비용 데이터 저장
+            fallback_data = posts  # fallback 대비용 데이터 저장
             print(f"[CHAT] posts_found={len(posts)}, keyword={keyword!r}, category_id(코드)={category_id!r}, db_category_name(한글)={db_category_name!r}")
             if posts:
                 print("[CHAT] posts_result=" + ", ".join(f"{post.id}:{post.title}" for post in posts))
@@ -147,23 +147,40 @@ async def generate_chat_response(messages: List[ChatMessage], db: Session) -> st
                 local_context = "\n".join(context_lines)
 
         # 2-3. 의도 3: 기타 (direct)
-        # 별도 DB 조회를 거치지 않고 prompt에 빈 값을 주어 GPT가 다이렉트로 답변하게 유도합니다.
         else:
             local_context = ""
 
-        # 3. GPT-4o-mini 호출
-        system_instruction = (
-            "너는 서울 및 지역 관광 커뮤니티인 'LocalHub'의 AI 가이드야.\n"
-            "답변 규칙:\n"
-            "1. 답변은 최대 5줄, 불필요한 장문 설명은 하지 마.\n"
-            "2. 추천은 핵심만 간단히 정리하고, 각 항목은 1~2줄로 써.\n"
-            "3. 리스트는 최대 4개까지만 보여줘.\n"
-            "[연관 커뮤니티 게시글 검색 결과]가 있으면 관련 글을 짧게 요약해줘.\n"
-            "게시글 데이터가 없다면 그냥 현재 게시판에 관련 게시글이 없다고 말해줘.\n"
-            "[추천 장소 정보 데이터]가 있으면 이름, 주소, 한줄 소개만 간단히 보여줘.\n"
-            "장소 데이터가 없다변 해당 지역/주제에 대해 네가 아는 범위에서 짧고 자연스럽게 안내해줘.\n"
-        )
+        # 3. 사용자의 의도(intent)별 맞춤형 동적 시스템 프롬프트(System Instruction) 분기 설계
+        if intent == "posts":
+            system_instruction = (
+                "너는 서울 및 지역 관광 커뮤니티인 'LocalHub'의 AI 가이드야.\n"
+                "사용자가 커뮤니티 '게시글/후기'를 검색하고 있으므로, 오직 제공된 [연관 커뮤니티 게시글 검색 결과]를 바탕으로 답해야 해.\n\n"
+                "답변 규칙:\n"
+                "1. [연관 커뮤니티 게시글 검색 결과]가 있다면, 검색된 게시글들의 핵심 내용을 아주 짧고 친근하게 요약해서 추천해줘.\n"
+                "2. 만약 [연관 커뮤니티 게시글 검색 결과]가 비어있다면, 다른 사족 없이 '현재 커뮤니티에 관련 게시글이 존재하지 않습니다.'라고 한 줄로 깔끔하게 안내해.\n"
+                "3. 장소 추천 데이터나 실시간 정보를 가지고 있지 않다는 등의 가이드는 절대 출력하지 마.\n"
+                "4. 답변은 요점 위주로 최대 4줄 이내로 작성해줘."
+            )
+        elif intent == "locations":
+            system_instruction = (
+                "너는 서울 및 지역 관광 커뮤니티인 'LocalHub'의 AI 가이드야.\n"
+                "사용자가 '장소/관광지 추천'을 원하므로, 제공된 [추천 장소 정보 데이터]를 가공해서 자연스럽게 소개해줘야 해.\n\n"
+                "답변 규칙:\n"
+                "1. [추천 장소 정보 데이터]가 있다면, 장소들의 '이름, 주소, 한줄 소개'만 깔끔하게 리스트 형식(최대 4개)으로 정리해서 보여줘.\n"
+                "2. 만약 [추천 장소 정보 데이터]가 없다면, 네가 기존에 알고 있는 배경지식을 활용해 해당 지역/테마의 매력적인 장소를 간결하게 추천해줘.\n"
+                "3. 커뮤니티 게시글이나 게시판에 대한 멘트는 절대로 언급하지 마.\n"
+                "4. 답변은 핵심만 콕 집어서 최대 5줄 이내로 작성해줘."
+            )
+        else:  # direct
+            system_instruction = (
+                "너는 서울 및 지역 관광 커뮤니티인 'LocalHub'의 친절한 AI 가이드야.\n\n"
+                "답변 규칙:\n"
+                "1. 사용자의 일반적인 대화, 날씨, 교통 정보 질문 등에 맞추어 일상적이고 유연하게 친절히 대답해줘.\n"
+                "2. 이 의도에서는 내부 데이터나 DB를 조회할 필요가 없으므로 '게시글이 없다'거나 '장소가 존재하지 않는다' 같은 부가 설명은 절대 쓰지 마.\n"
+                "3. 답변은 쓸데없이 길어지지 않게 용건만 간단히 최대 4줄 이내로 마무리해줘."
+            )
 
+        # 4. 메시지 조립 및 API 호출
         api_messages = [{"role": "system", "content": system_instruction}]
         if local_context:
             api_messages.append({"role": "system", "content": local_context})
@@ -176,6 +193,7 @@ async def generate_chat_response(messages: List[ChatMessage], db: Session) -> st
             response_format={"type": "text"},
             max_completion_tokens=2500
         )
+        
         first_choice = response.choices[0] if response.choices else None
         raw_message = first_choice.message if first_choice else None
         answer = (response.choices[0].message.content or "").strip()
@@ -185,7 +203,7 @@ async def generate_chat_response(messages: List[ChatMessage], db: Session) -> st
         return answer
 
     except Exception as openai_error:
-        # 4. Fallback 작동: API 문제 발생 시 자체 조합 텍스트 제공
+        # 5. Fallback 작동: API 문제 발생 시 자체 조합 텍스트 제공
         print(f"[OpenAI API 에러 - Fallback 실행]: {openai_error}")
         return generate_fallback_response(user_last_message, intent, fallback_data)
 
