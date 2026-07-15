@@ -4,6 +4,7 @@ import json
 import random
 from openai import AsyncOpenAI
 from sqlalchemy.orm import Session
+from app.models.post import Post
 from app.schemas.chat import ChatMessage
 from app.crud import list_locations, search_posts_from_db
 from typing import List
@@ -69,6 +70,25 @@ async def analyze_intent_with_ai(user_message: str) -> dict:
 
 async def generate_chat_response(messages: List[ChatMessage], db: Session) -> str:
     user_last_message = messages[-1].content
+    
+    print("\n" + "=" * 60)
+    try:
+        # 1. SQLAlchemy가 현재 바라보고 있는 DB 실제 물리 경로/접속 주소 출력
+        db_url = db.bind.url if db.bind else "알 수 없음 (바인딩되지 않음)"
+        print(f"📡 [DB 경로 확인] ➔ {db_url}")
+        
+        # 2. posts 테이블의 실제 데이터 총 개수 출력
+        posts_count = db.query(Post).count()
+        print(f"📊 [데이터 개수] ➔ 현재 posts 테이블 내 총 게시글 수: {posts_count}개")
+        
+        if posts_count > 0:
+            # 존재한다면 가장 최근에 등록된 글 제목 하나를 샘플로 출력하여 검증
+            latest_post = db.query(Post).order_by(Post.created_at.desc()).first()
+            print(f"📝 [최신 데이터 샘플] ➔ ID: {latest_post.id} | 제목: '{latest_post.title}'")
+            
+    except Exception as db_diagnostic_error:
+        print(f"❌ [DB 진단 실패] DB 연결 상태 또는 posts 테이블을 찾을 수 없습니다.\n오류 내용: {db_diagnostic_error}")
+    print("=" * 60 + "\n")
     
     # 1. AI 의도 분석 호출
     analysis = await analyze_intent_with_ai(user_last_message)
