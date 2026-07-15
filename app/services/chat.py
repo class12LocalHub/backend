@@ -104,15 +104,23 @@ async def generate_chat_response(messages: List[ChatMessage], db: Session) -> st
     try:
         # 2-1. 의도 1: 게시글 검색 (posts)
         if intent == "posts":
-            posts = search_posts_from_db(db, keyword=keyword, category_id=category_id)
+            # 💡 [수정] AI가 뽑아준 카테고리 코드("12")를 DB에 저장된 한글 카테고리명("관광지")으로 변환합니다.
+            db_category_name = None
+            if category_id:
+                # CATEGORY_CODES를 역으로 추적하여 한글 키값을 찾습니다.
+                db_category_name = next((k for k, v in CATEGORY_CODES.items() if v == category_id), None)
+            
+            # DB 조회 시 category_id 파라미터에 한글 카테고리명(db_category_name)을 전달합니다.
+            posts = search_posts_from_db(db, keyword=keyword, category_id=db_category_name)
+            
             fallback_data = posts # fallback 대비용 데이터 저장
-            print(f"[CHAT] posts_found={len(posts)}, keyword={keyword!r}, category_id={category_id!r}")
+            print(f"[CHAT] posts_found={len(posts)}, keyword={keyword!r}, category_id(코드)={category_id!r}, db_category_name(한글)={db_category_name!r}")
             if posts:
                 print("[CHAT] posts_result=" + ", ".join(f"{post.id}:{post.title}" for post in posts))
                 context_lines = ["[연관 커뮤니티 게시글 검색 결과]"]
                 for idx, post in enumerate(posts, 1):
-                    # 카테고리 ID 역매핑하여 이름 획득
-                    cat_name = next((k for k, v in CATEGORY_CODES.items() if v == post.category), "일반")
+                    # 카테고리 ID 역매핑하여 이름 획득 (DB에 이미 한글명이 들어있으므로 post.category를 그대로 씁니다)
+                    cat_name = post.category or "일반"
                     context_lines.append(
                         f"게시글 {idx}. 제목: {post.title} | 게시판: {cat_name}\n"
                         f"   - 본문 요약: {post.content[:150]}..."
