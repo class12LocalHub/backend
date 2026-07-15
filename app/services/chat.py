@@ -1,64 +1,170 @@
-# app/services/chat.py
-import os
 import json
-import random
-from openai import AsyncOpenAI
-from sqlalchemy.orm import Session
-from app.schemas.chat import ChatMessage
-from app.crud import list_locations, search_posts_from_db
-from typing import List
+import os
+
 from dotenv import load_dotenv
+from openai import AsyncOpenAI
+from sqlalchemy import or_, select
+from sqlalchemy.orm import Session
+
+from app.crud import list_locations
+from app.models.post import Post
+from app.schemas.chat import ChatMessage, ChatResponse, ChatSource
+
 
 load_dotenv()
 
-openai_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# 게시판 카테고리 코드 매핑 사전
-CATEGORY_CODES = {
-    "관광지": "12",
-    "문화시설": "14",
-    "축제공연행사": "15",
-    "여행코스": "25",
-    "레포츠": "28",
-    "숙박": "32",
-    "쇼핑": "38"
+SUPPORTED_CATEGORIES = [
+    "관광지",
+    "문화시설",
+    "축제공연행사",
+    "여행코스",
+    "레포츠",
+    "숙박",
+    "쇼핑",
+]
+
+CATEGORY_ID_TO_NAME = {
+    "12": "관광지",
+    "14": "문화시설",
+    "15": "축제공연행사",
+    "25": "여행코스",
+    "28": "레포츠",
+    "32": "숙박",
+    "38": "쇼핑",
 }
 
-async def analyze_intent_with_ai(user_message: str) -> dict:
-    """
-    1단계: 사용자의 질문 의도를 3가지(posts, locations, direct)로 분류하고 필요한 검색 파라미터를 추출합니다.
-    """
-    system_prompt = (
-        "너는 사용자의 질문 의도를 분류하고 적절한 검색 조건을 추출하는 라우터 엔진이야.\n"
-        "사용자의 질문을 분석하여 반드시 아래 JSON 형식으로만 응답해야 해. 다른 말은 덧붙이지 마.\n\n"
-        "{\n"
-        "  \"intent\": \"posts | locations | direct\",\n"
-        "  \"category_id\": \"12 | 14 | 15 | 25 | 28 | 32 | 38 | null\",  // 관련된 게시판 카테고리가 연상되는 경우에만 코드를 선택해줘.\n"
-        "  \"keyword\": \"검색을 위한 핵심 키워드(지역명이나 핵심 단어) 또는 null\"\n"
-        "}\n\n"
-        "■ 의도 분류 규칙(intent):\n"
-        "1. posts (관련 게시글 검색): 사용자가 '게시글', '자유게시판', '후기', '커뮤니티 글', '글 추천' 등 다른 유저들이 작성한 글을 찾을 때\n"
-        "2. locations (장소 추천): 서울의 권역별/행정구역별 관광지 추천, 축제 정보 등 우리 시스템이 보유한 실제 공공 장소 데이터를 바탕으로 응답할 수 있는 질문일 때\n"
-        "3. direct (기타): 모범 음식점 위치, 축제 일정표(현재의 리스트 데이터에 없는 스케줄), 날씨, 교통 정보 등 외부 실시간 정보가 필요하거나 기타 일반 대화일 때\n\n"
-        "■ category_id 매핑 가이드:\n"
-        "- 관광지 관련 질문: \"12\"\n"
-        "- 미술관, 전시관 등 문화시설 관련 질문: \"14\"\n"
-        "- 축제, 이벤트, 행사 관련 질문: \"15\"\n"
-        "- 여행코스 추천 관련 질문: \"25\"\n"
-        "- 레포츠, 액티비티 관련 질문: \"28\"\n"
-        "- 숙박, 호텔, 게스트하우스 관련 질문: \"32\"\n"
-        "- 쇼핑, 시장, 백화점 관련 질문: \"38\"\n"
-        "- 음식점, 맛집 관련 질문은 지원하지 않으므로 무조건 null 처리하고 direct 의도로 분류해줘.\n"
+SEARCH_STOP_WORDS = {
+    "서울",
+    "관련",
+    "장소",
+    "관광지",
+    "추천",
+    "추천해줘",
+    "알려줘",
+    "어디야",
+    "주소",
+    "게시글",
+    "찾아줘",
+    "보여줘",
+}
+
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5-mini")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+# API 키가 없어도 서버 자체는 실행될 수 있도록 한다.
+openai_client = (
+    AsyncOpenAI(api_key=OPENAI_API_KEY)
+    if OPENAI_API_KEY
+    else None
+)
+
+
+def _extract_keyword(message: str) -> str | None:
+    normalized = message
+
+    for mark in ("?", "!", ",", ".", "\n"):
+        normalized = normalized.replace(mark, " ")
+
+    terms = [
+        term.strip()
+        for term in normalized.split()
+        if len(term.strip()) >= 2
+        and term.strip() not in SEARCH_STOP_WORDS
+        and term.strip() not in SUPPORTED_CATEGORIES
+    ]
+
+    return terms[0] if terms else None
+
+
+def _fallback_analysis(message: str) -> dict:
+    if any(
+        word in message
+        for word in (
+            "게시글",
+            "커뮤니티",
+            "후기",
+            "작성글",
+            "글 찾아",
+        )
+    ):
+        intent = "posts"
+    elif any(
+        word in message
+        for word in (
+            "장소",
+            "추천",
+            "관광",
+            "숙박",
+            "호텔",
+            "쇼핑",
+            "축제",
+            "여행코스",
+            "레포츠",
+            "문화시설",
+        )
+    ):
+        intent = "locations"
+    else:
+        intent = "direct"
+
+    category = next(
+        (
+            category
+            for category in SUPPORTED_CATEGORIES
+            if category in message
+        ),
+        None,
     )
+
+    return {
+        "intent": intent,
+        "category": category,
+        "keyword": _extract_keyword(message),
+    }
+
+
+async def analyze_intent_with_ai(
+    user_message: str,
+) -> dict:
+    if openai_client is None:
+        return _fallback_analysis(user_message)
+
+    system_prompt = """
+너는 LocalHub 사용자의 질문을 분석하는 분류기다.
+
+반드시 아래 JSON 형식으로만 응답한다.
+
+{
+  "intent": "posts | locations | direct",
+  "category": "관광지 | 문화시설 | 축제공연행사 | 여행코스 | 레포츠 | 숙박 | 쇼핑 | null",
+  "keyword": "검색할 핵심 단어 또는 null"
+}
+
+분류 규칙:
+- posts: 게시글, 후기, 커뮤니티 글을 찾는 질문
+- locations: LocalHub가 보유한 서울 장소를 찾거나 추천받는 질문
+- direct: 날씨, 교통 등 현재 LocalHub 데이터 검색과 직접 관련 없는 질문
+
+음식점 데이터는 지원하지 않으므로 음식점 질문은 direct로 분류한다.
+""".strip()
 
     try:
         response = await openai_client.chat.completions.create(
-            model="gpt-5-mini",
+            model=OPENAI_MODEL,
             messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"사용자 질문: \"{user_message}\""}
+                {
+                    "role": "system",
+                    "content": system_prompt,
+                },
+                {
+                    "role": "user",
+                    "content": user_message,
+                },
             ],
-            response_format={"type": "json_object"}
+            response_format={
+                "type": "json_object",
+            },
         )
         raw_content = response.choices[0].message.content if response.choices else None
         return json.loads(raw_content)
@@ -67,19 +173,324 @@ async def analyze_intent_with_ai(user_message: str) -> dict:
         return {"intent": "direct", "category_id": None, "keyword": None}
 
 
-async def generate_chat_response(messages: List[ChatMessage], db: Session) -> str:
-    user_last_message = messages[-1].content
-    
-    # 1. AI 의도 분석 호출
-    analysis = await analyze_intent_with_ai(user_last_message)
-    intent = analysis.get("intent", "direct")
-    category_id = analysis.get("category_id")
-    keyword = analysis.get("keyword") or user_last_message
+def _search_posts(
+    db: Session,
+    *,
+    keyword: str | None,
+    category: str | None,
+    limit: int = 4,
+) -> list[Post]:
+    stmt = select(Post)
+
+    if category:
+        stmt = stmt.where(
+            Post.category == category
+        )
+
+    if keyword:
+        # 사용자가 직접 입력한 custom_tags는 검색에 포함하지 않는다.
+        stmt = stmt.where(
+            or_(
+                Post.title.contains(keyword),
+                Post.content.contains(keyword),
+            )
+        )
+
+    stmt = (
+        stmt.order_by(Post.created_at.desc())
+        .limit(limit)
+    )
+
+    return list(db.scalars(stmt).all())
+
+
+def _search_locations(
+    *,
+    keyword: str | None,
+    category: str | None,
+    limit: int = 4,
+) -> list[dict]:
+    locations, _, _ = list_locations(
+        category=category,
+        keyword=keyword,
+        page=1,
+        size=limit,
+    )
+
+    return locations
+
+
+def _to_int(value: object) -> int | None:
+    try:
+        return int(str(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _post_sources(
+    posts: list[Post],
+) -> list[ChatSource]:
+    return [
+        ChatSource(
+            type="post",
+            id=post.id,
+            title=post.title,
+            category=post.category,
+        )
+        for post in posts
+    ]
+
+
+def _location_sources(
+    locations: list[dict],
+) -> list[ChatSource]:
+    sources: list[ChatSource] = []
+
+    for location in locations:
+        location_id = _to_int(
+            location.get("id")
+        )
+
+        if location_id is None:
+            continue
+
+        sources.append(
+            ChatSource(
+                type="location",
+                id=location_id,
+                name=location.get("name"),
+                category=location.get(
+                    "category"
+                ),
+            )
+        )
+
+    return sources
+
+
+def _fallback_response(
+    *,
+    user_message: str,
+    intent: str,
+    data: list,
+    query_type: str,
+    sources: list[ChatSource],
+) -> ChatResponse:
+    if intent == "posts":
+        if not data:
+            answer = (
+                "관련 게시글을 찾지 못했습니다."
+            )
+        else:
+            lines = [
+                "관련 커뮤니티 게시글을 찾았습니다."
+            ]
+
+            for index, post in enumerate(
+                data,
+                start=1,
+            ):
+                lines.append(
+                    (
+                        f"{index}. {post.title} "
+                        f"({post.category})"
+                    )
+                )
+
+            answer = "\n".join(lines)
+
+    elif intent == "locations":
+        if not data:
+            answer = (
+                "제공된 서울 지역정보에서 "
+                "관련 장소를 찾지 못했습니다."
+            )
+        else:
+            lines = [
+                "추천 장소를 찾았습니다."
+            ]
+
+            for index, location in enumerate(
+                data,
+                start=1,
+            ):
+                lines.append(
+                    (
+                        f"{index}. "
+                        f"{location.get('name')} - "
+                        f"{location.get('address') or '주소 정보 없음'}"
+                    )
+                )
+
+            answer = "\n".join(lines)
+
+    else:
+        answer = (
+            "현재 AI 응답 기능을 사용할 수 없습니다. "
+            "서울 장소나 게시글 검색으로 질문해 주세요."
+        )
+
+    return ChatResponse(
+        answer=answer,
+        query_type=query_type,
+        sources=sources,
+    )
+
+
+async def generate_chat_response(
+    messages: list[ChatMessage],
+    db: Session,
+) -> ChatResponse:
+    if not messages:
+        return ChatResponse(
+            answer="질문을 입력해 주세요.",
+            query_type="unknown",
+            sources=[],
+        )
+
+    user_last_message = next(
+        (
+            message.content
+            for message in reversed(messages)
+            if message.role == "user"
+        ),
+        messages[-1].content,
+    )
+
+    analysis = await analyze_intent_with_ai(
+        user_last_message
+    )
+
+    intent = analysis.get(
+        "intent",
+        "direct",
+    )
+    category = analysis.get("category")
+    keyword = (
+        analysis.get("keyword")
+        or _extract_keyword(user_last_message)
+    )
 
     print(f"[CHAT] intent={intent}, category_id={category_id!r}, keyword={keyword!r}")
 
     local_context = ""
-    fallback_data = []
+    data: list = []
+    sources: list[ChatSource] = []
+
+    if intent == "posts":
+        data = _search_posts(
+            db,
+            keyword=keyword,
+            category=category,
+        )
+        sources = _post_sources(data)
+        query_type = "게시글검색"
+
+        if data:
+            context_lines = [
+                "[연관 커뮤니티 게시글]"
+            ]
+
+            for index, post in enumerate(
+                data,
+                start=1,
+            ):
+                context_lines.append(
+                    (
+                        f"{index}. 제목: {post.title}\n"
+                        f"카테고리: {post.category}\n"
+                        f"내용: {post.content[:200]}"
+                    )
+                )
+
+            local_context = "\n".join(
+                context_lines
+            )
+
+    elif intent == "locations":
+        data = _search_locations(
+            keyword=keyword,
+            category=category,
+        )
+        sources = _location_sources(data)
+
+        query_type = (
+            f"{category}추천"
+            if category
+            else "장소검색"
+        )
+
+        if data:
+            context_lines = [
+                "[LocalHub 서울 장소 데이터]"
+            ]
+
+            for index, location in enumerate(
+                data,
+                start=1,
+            ):
+                context_lines.append(
+                    (
+                        f"{index}. 이름: "
+                        f"{location.get('name')}\n"
+                        f"카테고리: "
+                        f"{location.get('category')}\n"
+                        f"주소: "
+                        f"{location.get('address')}\n"
+                        f"설명: "
+                        f"{location.get('summary') or location.get('description') or '정보 없음'}"
+                    )
+                )
+
+            local_context = "\n".join(
+                context_lines
+            )
+
+    else:
+        query_type = "general"
+
+    if openai_client is None:
+        return _fallback_response(
+            user_message=user_last_message,
+            intent=intent,
+            data=data,
+            query_type=query_type,
+            sources=sources,
+        )
+
+    system_instruction = """
+너는 서울 지역정보 커뮤니티 LocalHub의 AI 가이드다.
+
+규칙:
+1. 답변은 핵심만 간결하게 작성한다.
+2. 최대 4개까지만 추천한다.
+3. 제공된 지역정보와 게시글 내용을 우선 사용한다.
+4. 제공되지 않은 장소의 주소나 운영시간을 지어내지 않는다.
+5. 커뮤니티 게시글은 사용자가 작성한 후기라는 점을 명확히 한다.
+""".strip()
+
+    api_messages = [
+        {
+            "role": "system",
+            "content": system_instruction,
+        }
+    ]
+
+    if local_context:
+        api_messages.append(
+            {
+                "role": "system",
+                "content": local_context,
+            }
+        )
+
+    for message in messages[-20:]:
+        api_messages.append(
+            {
+                "role": message.role,
+                "content": message.content,
+            }
+        )
 
     try:
         # 2-1. 의도 1: 게시글 검색 (posts)
@@ -136,11 +547,16 @@ async def generate_chat_response(messages: List[ChatMessage], db: Session) -> st
             "장소 데이터가 없다변 해당 지역/주제에 대해 네가 아는 범위에서 짧고 자연스럽게 안내해줘.\n"
         )
 
-        api_messages = [{"role": "system", "content": system_instruction}]
-        if local_context:
-            api_messages.append({"role": "system", "content": local_context})
-        for msg in messages:
-            api_messages.append({"role": msg.role, "content": msg.content})
+        if not response.choices:
+            raise ValueError(
+                "OpenAI 응답 choice가 없습니다."
+            )
+
+        answer = (
+            response.choices[0]
+            .message.content
+            or ""
+        ).strip()
 
         response = await openai_client.chat.completions.create(
             model="gpt-5-mini",
@@ -193,4 +609,21 @@ def generate_fallback_response(user_message: str, intent: str, data: list) -> st
                 f"- ✍️ 소개: {loc.get('summary') or loc.get('description') or '상세 설명 정보가 부족합니다.'}\n"
             )
 
-    return intro + "\n".join(results)
+        return ChatResponse(
+            answer=answer,
+            query_type=query_type,
+            sources=sources,
+        )
+
+    except Exception as error:
+        print(
+            f"[OpenAI 응답 실패 - fallback]: {error}"
+        )
+
+        return _fallback_response(
+            user_message=user_last_message,
+            intent=intent,
+            data=data,
+            query_type=query_type,
+            sources=sources,
+        )
