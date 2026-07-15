@@ -1,7 +1,7 @@
 from math import ceil
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -10,6 +10,7 @@ from app.models.post import Post
 from app.schemas.post import (
     PostCreateRequest,
     PostDeleteResponse,
+    PostDetailResponse,
     PostListResponse,
     PostMessageResponse,
     PostPasswordRequest,
@@ -126,12 +127,13 @@ def get_posts(
 
 @router.get(
     "/{post_id}",
+    response_model=PostDetailResponse,
     summary="게시글 상세 조회",
 )
 def get_post(
     post_id: int,
     db: Session = Depends(get_db),
-) -> dict:
+) -> PostDetailResponse:
     post = db.get(Post, post_id)
 
     if post is None:
@@ -143,7 +145,15 @@ def get_post(
             },
         )
 
-    post.view_count += 1
+    original_updated_at = post.updated_at
+    db.execute(
+        update(Post)
+        .where(Post.id == post.id)
+        .values(
+            view_count=Post.view_count + 1,
+            updated_at=original_updated_at,
+        )
+    )
     db.commit()
     db.refresh(post)
 
@@ -155,6 +165,7 @@ def get_post(
         if location_row is not None:
             location = {
                 "id": location_row.id,
+                "source_id": location_row.source_id,
                 "name": location_row.name,
                 "category": location_row.category,
                 "address": location_row.address,
@@ -163,18 +174,21 @@ def get_post(
                 "thumbnail_url": location_row.thumbnail_url,
             }
 
-    return {
-        "id": post.id,
-        "title": post.title,
-        "content": post.content,
-        "category": post.category,
-        "custom_tags": post.custom_tags,
-        "image_url": post.image_url,
-        "view_count": post.view_count,
-        "created_at": post.created_at,
-        "updated_at": post.updated_at,
-        "location": location,
-    }
+    return PostDetailResponse.model_validate(
+        {
+            "id": post.id,
+            "title": post.title,
+            "content": post.content,
+            "category": post.category,
+            "location_id": post.location_id,
+            "custom_tags": post.custom_tags,
+            "image_url": post.image_url,
+            "view_count": post.view_count,
+            "created_at": post.created_at,
+            "updated_at": post.updated_at,
+            "location": location,
+        }
+    )
 
 
 @router.put(

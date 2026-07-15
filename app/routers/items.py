@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Query, status
 
-from app.crud import get_dashboard_stats, get_location, get_map_filters, list_locations
-from app.schemas.location import DashboardResponse, LocationListResponse, MapFiltersResponse, MapPoiDetail, MapPoiListResponse
+from app.crud import get_location, get_map_filters, list_locations
+from app.schemas.location import LocationListResponse, MapFiltersResponse, MapPoiDetail, MapPoiListResponse
 
 
 router = APIRouter(prefix="/api", tags=["items"])
@@ -16,8 +16,8 @@ def list_map_pois(
 	keyword: str | None = None,
 	region: str | None = None,
 	bbox: str | None = None,
-	page: int = 1,
-	size: int = 20,
+	page: int = Query(default=1, ge=1),
+	size: int = Query(default=20, ge=1, le=100),
 ) -> MapPoiListResponse:
 	items, total, total_pages = list_locations(
 		place_type=place_type,
@@ -55,8 +55,8 @@ def list_locations_api(
 	place_type: str | None = "all",
 	category: str | None = None,
 	keyword: str | None = None,
-	page: int = 1,
-	size: int = 20,
+	page: int = Query(default=1, ge=1),
+	size: int = Query(default=20, ge=1, le=100),
 	region: str | None = None,
 	bbox: str | None = None,
 ) -> LocationListResponse:
@@ -84,9 +84,3 @@ def get_location_api(location_id: int) -> MapPoiDetail:
 			},
 		)
 	return MapPoiDetail.model_validate(location)
-
-
-@router.get("/dashboard")
-def dashboard_api() -> DashboardResponse:
-	return DashboardResponse.model_validate(get_dashboard_stats())
-

@@ -2,5 +2,4 @@
 
 set -o errexit
 
-pip install -r requirements.txt
-python -m scripts.seed_locations
+python -m pip install -r requirements.txt

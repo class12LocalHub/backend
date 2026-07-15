@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.location import Location
+from app.schemas.location import LocationSuggestionResponse
 
 
 router = APIRouter(
@@ -14,6 +15,7 @@ router = APIRouter(
 
 @router.get(
     "/suggestions",
+    response_model=LocationSuggestionResponse,
     summary="장소 이름 자동완성 및 초성 검색",
     description="장소명 또는 한글 초성으로 장소를 검색합니다.",
 )
@@ -30,7 +32,7 @@ def suggest_locations(
         description="최대 검색 결과 개수",
     ),
     db: Session = Depends(get_db),
-) -> dict:
+) -> LocationSuggestionResponse:
     normalized_keyword = keyword.strip()
 
     stmt = (
@@ -47,50 +49,21 @@ def suggest_locations(
 
     locations = db.scalars(stmt).all()
 
-    return {
-        "items": [
-            {
-                "id": location.id,
-                "source_id": location.source_id,
-                "name": location.name,
-                "category": location.category,
-                "address": location.address,
-                "latitude": location.latitude,
-                "longitude": location.longitude,
-                "image_url": location.image_url,
-                "thumbnail_url": location.thumbnail_url,
-            }
-            for location in locations
-        ]
-    }
-
-
-@router.get(
-    "/{location_id}",
-    summary="장소 상세 조회",
-)
-def get_location(
-    location_id: int,
-    db: Session = Depends(get_db),
-) -> dict:
-    location = db.get(Location, location_id)
-
-    if location is None:
-        return {
-            "error": {
-                "code": "LOCATION_NOT_FOUND",
-                "message": "장소를 찾을 수 없습니다.",
-            }
+    return LocationSuggestionResponse.model_validate(
+        {
+            "items": [
+                {
+                    "id": location.id,
+                    "source_id": location.source_id,
+                    "name": location.name,
+                    "category": location.category,
+                    "address": location.address,
+                    "latitude": location.latitude,
+                    "longitude": location.longitude,
+                    "image_url": location.image_url,
+                    "thumbnail_url": location.thumbnail_url,
+                }
+                for location in locations
+            ]
         }
-
-    return {
-        "id": location.id,
-        "source_id": location.source_id,
-        "name": location.name,
-        "category": location.category,
-        "address": location.address,
-        "latitude": location.latitude,
-        "longitude": location.longitude,
-        "image_url": location.image_url,
-        "thumbnail_url": location.thumbnail_url,
-    }
+    )
