@@ -131,6 +131,15 @@ GET /api/categories
 
 Leaflet.js 기반 관광지·맛집 지도 핀 시각화와 권역 필터를 제공하는 API다. 핀 데이터는 `data/locations.json`을 그대로 조회해 사용한다.
 
+### 장소 ID 계약
+
+- Map API와 JSON 지역정보 API의 `id`는 TourAPI의 `source_contentid`이다.
+- `GET /api/locations/suggestions`의 `id`는 SQLite `locations.id`이며,
+  게시글 생성·수정의 `location_id`로 사용한다.
+- suggestions의 `source_id`는 TourAPI `source_contentid`이므로 Map POI `id`와
+  같은 ID 체계이다.
+- Map POI `id`와 게시글 `location_id`를 서로 교체해서 사용하지 않는다.
+
 ### 5.1 지도 핀 목록 조회
 
 ```http
@@ -375,6 +384,33 @@ GET /api/locations/2611482
 
 `telephone`, `homepage`, 날짜, 좌표 등은 원본 JSON에 값이 없으면 `null`로 반환한다.
 
+### 6.3 장소 자동완성 및 초성 검색
+
+```http
+GET /api/locations/suggestions?keyword=ㄱㅂㄱ&limit=10
+```
+
+```json
+{
+  "items": [
+    {
+      "id": 15,
+      "source_id": "126508",
+      "name": "경복궁",
+      "category": "관광지",
+      "address": "서울특별시 종로구 사직로 161",
+      "latitude": 37.579617,
+      "longitude": 126.977041,
+      "image_url": null,
+      "thumbnail_url": null
+    }
+  ]
+}
+```
+
+`id`는 게시글 `location_id`에 사용하는 SQLite PK이고,
+`source_id`는 Map POI `id`와 같은 TourAPI ID이다.
+
 ---
 
 ## 6. 게시글 API
@@ -392,6 +428,9 @@ GET /api/locations/2611482
 | `updated_at` | datetime | 수정일 |
 
 비밀번호는 데이터베이스에 저장하지만 API 응답에는 포함하지 않는다.
+
+`location_id`는 선택 필드이며, `/api/locations/suggestions` 응답의
+`id`(SQLite `locations.id`)를 사용한다. Map POI `id`를 사용하지 않는다.
 
 ---
 
@@ -561,7 +600,7 @@ PUT /api/posts/{post_id}
 
 ```json
 {
-  "error": {
+  "detail": {
     "code": "INVALID_PASSWORD",
     "message": "비밀번호가 일치하지 않습니다."
   }
@@ -615,7 +654,7 @@ await fetch(`${API_BASE_URL}/api/posts/${postId}`, {
 
 ```json
 {
-  "error": {
+  "detail": {
     "code": "INVALID_PASSWORD",
     "message": "비밀번호가 일치하지 않습니다."
   }
@@ -804,7 +843,7 @@ GET /api/health
 
 ```json
 {
-  "error": {
+  "detail": {
     "code": "ERROR_CODE",
     "message": "사용자에게 보여줄 오류 메시지"
   }
@@ -825,7 +864,7 @@ GET /api/health
 
 ```json
 {
-  "error": {
+  "detail": {
     "code": "POST_NOT_FOUND",
     "message": "게시글을 찾을 수 없습니다."
   }
@@ -836,7 +875,7 @@ GET /api/health
 
 ```json
 {
-  "error": {
+  "detail": {
     "code": "INVALID_CATEGORY",
     "message": "사용할 수 없는 카테고리입니다."
   }

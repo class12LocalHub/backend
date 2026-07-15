@@ -9,7 +9,9 @@ PlaceType = Literal["tourist", "restaurant", "all"]
 
 
 class LocationBase(BaseModel):
-    id: int
+    id: int = Field(
+        description="TourAPI source_contentid. 게시글 location_id(SQLite PK)와 다른 ID입니다."
+    )
     name: str
     category: str
     address: str | None = None
@@ -82,3 +84,27 @@ class DashboardResponse(BaseModel):
     region: str
     total_locations: int
     category_counts: list[DashboardCategoryCount]
+
+
+class LocationSuggestionItem(BaseModel):
+    id: int = Field(
+        description="SQLite locations.id. 게시글 요청의 location_id에 사용합니다."
+    )
+    source_id: str = Field(
+        description="TourAPI source_contentid. Map POI id와 같은 ID 체계입니다."
+    )
+    name: str
+    category: str
+    address: str | None = None
+    latitude: float | None = None
+    longitude: float | None = None
+    image_url: str | None = None
+    thumbnail_url: str | None = None
+
+
+class LocationSuggestionResponse(BaseModel):
+    items: list[LocationSuggestionItem]
+
+
+class CategoryListResponse(BaseModel):
+    categories: list[str]

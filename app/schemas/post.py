@@ -20,7 +20,13 @@ class PostCreateRequest(BaseModel):
     content: str = Field(min_length=1)
     password: str = Field(min_length=4, max_length=20)
     category: PostCategory
-    location_id: int | None = None
+    location_id: int | None = Field(
+        default=None,
+        description=(
+            "SQLite locations.id. /api/locations/suggestions 응답의 id를 사용합니다. "
+            "Map POI id(TourAPI source_contentid)를 사용하지 않습니다."
+        ),
+    )
     custom_tags: list[str] = Field(default_factory=list, max_length=5)
     image_url: HttpUrl | None = None
 
@@ -49,7 +55,13 @@ class PostUpdateRequest(BaseModel):
     content: str = Field(min_length=1)
     password: str = Field(min_length=4, max_length=20)
     category: PostCategory
-    location_id: int | None = None
+    location_id: int | None = Field(
+        default=None,
+        description=(
+            "SQLite locations.id. /api/locations/suggestions 응답의 id를 사용합니다. "
+            "Map POI id(TourAPI source_contentid)를 사용하지 않습니다."
+        ),
+    )
     custom_tags: list[str] = Field(default_factory=list, max_length=5)
     image_url: HttpUrl | None = None
 
@@ -82,7 +94,9 @@ class PostResponse(BaseModel):
     title: str
     content: str
     category: str
-    location_id: int | None
+    location_id: int | None = Field(
+        description="SQLite locations.id. Map POI id와 다른 ID입니다."
+    )
     custom_tags: list[str]
     image_url: str | None
     view_count: int
@@ -96,7 +110,9 @@ class PostListItemResponse(BaseModel):
     id: int
     title: str
     category: str
-    location_id: int | None
+    location_id: int | None = Field(
+        description="SQLite locations.id. Map POI id와 다른 ID입니다."
+    )
     custom_tags: list[str]
     image_url: str | None
     view_count: int
@@ -122,3 +138,20 @@ class PostMessageResponse(BaseModel):
 class PostDeleteResponse(BaseModel):
     message: str
     deleted_id: int
+
+
+class PostLocationResponse(BaseModel):
+    id: int = Field(description="SQLite locations.id")
+    source_id: str = Field(
+        description="TourAPI source_contentid. Map POI id와 같은 ID입니다."
+    )
+    name: str
+    category: str
+    address: str | None
+    latitude: float | None
+    longitude: float | None
+    thumbnail_url: str | None
+
+
+class PostDetailResponse(PostResponse):
+    location: PostLocationResponse | None
