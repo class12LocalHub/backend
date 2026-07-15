@@ -91,3 +91,48 @@ For open source projects, say how it is licensed.
 
 ## Project status
 If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+
+```
+backend
+├─ app
+│  ├─ crud.py
+│  ├─ database.py
+│  ├─ main.py
+│  ├─ models
+│  │  ├─ location.py
+│  │  ├─ post.py
+│  │  └─ __init__.py
+│  ├─ routers
+│  │  ├─ chat.py
+│  │  ├─ dashboard.py
+│  │  ├─ items.py
+│  │  ├─ locations.py
+│  │  ├─ map.py
+│  │  ├─ posts.py
+│  │  └─ __init__.py
+│  ├─ schemas
+│  │  ├─ location.py
+│  │  ├─ post.py
+│  │  └─ __init__.py
+│  ├─ services
+│  │  └─ chat.py
+│  └─ __init__.py
+├─ build.sh
+├─ data
+│  ├─ locations.json
+│  └─ raw
+│     ├─ 서울_관광지.json
+│     ├─ 서울_레포츠.json
+│     ├─ 서울_문화시설.json
+│     ├─ 서울_쇼핑.json
+│     ├─ 서울_숙박.json
+│     ├─ 서울_여행코스.json
+│     └─ 서울_축제공연행사.json
+├─ LocalHub_API_명세서_초안_v0.1.md
+├─ README.md
+├─ requirements.txt
+└─ scripts
+   ├─ seed_locations.py
+   └─ __init__.py
+
+```
