@@ -273,6 +273,16 @@ def get_dashboard_stats() -> dict[str, Any]:
 		],
 	}
 
+단 하나의 테스트 게시물을 타깃으로 삼아 정확히 비교 분석할 수 있도록 로그를 대폭 업그레이드했습니다.
+
+실제 DB에 저장된 테스트용 1번 게시물의 원본 데이터(title, category, custom_tags)와 현재 사용자의 검색 조건(keyword, category_id)을 터미널 콘솔창에 양옆으로 배치하여, 어디가 일치하고 어디가 불일치하는지 눈으로 즉시 확인할 수 있는 비교 로그를 추가했습니다.
+
+🛠️ 데이터 비교 로그가 추가된 search_posts_from_db 전체 코드
+Python
+from sqlalchemy.orm import Session
+from sqlalchemy import or_
+from app.models.post import Post
+
 def search_posts_from_db(
     db: Session, 
     *, 
@@ -280,20 +290,80 @@ def search_posts_from_db(
     category_id: str | None = None, 
     limit: int = 4
 ) -> list[Post]:
+    """
+    데이터베이스의 posts 테이블에서 제목, 태그를 검색하고 카테고리 필터를 적용합니다.
+    실제 저장된 1번 테스트 데이터와 검색 비교 대조군을 실시간 로깅합니다.
+    """
+    print("\n" + "═" * 60)
+    print("📥 [DB QUERY START] search_posts_from_db 분석 및 대조군 테스트")
+    print("═" * 60)
+
+    # 1. 테스트 목적을 위해 현재 DB에 존재하는 1번 게시글 원본 강제 로드 및 분석
+    try:
+        test_post = db.query(Post).filter(Post.id == 1).first()
+        if test_post:
+            print("📝 [대조군 데이터 - DB 실제 값]")
+            print(f"   ├─ ID        : {test_post.id}")
+            print(f"   ├─ 제목(Title): {test_post.title!r}")
+            print(f"   ├─ 카테고리  : {test_post.category!r} (타입: {type(test_post.category).__name__})")
+            print(f"   └─ 태그(Tags) : {test_post.custom_tags!r} (타입: {type(test_post.custom_tags).__name__})")
+        else:
+            print("⚠️ [대조군 데이터 Warning] DB에 ID가 1인 테스트 게시글이 존재하지 않습니다.")
+    except Exception as check_err:
+        print(f"❌ [대조군 로드 실패] 에러: {check_err}")
+
+    # 2. 현재 넘어온 검색 요청 데이터 출력
+    print("\n🔍 [실시간 검색 요청 값]")
+    print(f"   ├─ category_id : {category_id!r} (타입: {type(category_id).__name__})")
+    print(f"   └─ keyword     : {keyword!r} (타입: {type(keyword).__name__})")
+
+    # 3. 매칭 조건 가시적 대조(Match Checking)
+    if test_post:
+        print("\n⚖️ [조건별 일치 여부 판독기]")
+        
+        # 카테고리 검증
+        cat_match = (test_post.category == category_id)
+        print(f"   ├─ 카테고리 일치 여부: {'✅ MATCH (일치함)' if cat_match else '❌ MISMATCH (불일치)'}")
+        print(f"   │  └─ 상세비교: {test_post.category!r} == {category_id!r}")
+        
+        # 키워드(제목 포함) 검증
+        title_match = keyword in test_post.title if keyword and test_post.title else False
+        print(f"   ├─ 제목 내 키워드 포함: {'✅ MATCH (포함됨)' if title_match else '❌ MISMATCH (없음)'}")
+        print(f"   │  └─ 상세비교: {keyword!r} in {test_post.title!r}")
+        
+        # 키워드(커스텀 태그 포함) 검증
+        # custom_tags가 문자열이거나 리스트 형태일 때의 범용 검색 포함 처리
+        tag_match = False
+        if keyword and test_post.custom_tags:
+            tag_match = keyword in str(test_post.custom_tags)
+        print(f"   └─ 태그 내 키워드 포함: {'✅ MATCH (포함됨)' if tag_match else '❌ MISMATCH (없음)'}")
+        print(f"      └─ 상세비교: {keyword!r} in {test_post.custom_tags!r}")
+
+    print("─" * 60)
+
+    # 4. 실제 DB 쿼리 조립 및 실행
     query = db.query(Post)
     
-    # 1. 카테고리 필터링
+    # 카테고리 필터링
     if category_id:
         query = query.filter(Post.category == category_id)
         
-    # 2. 제목(title) 또는 태그(custom_tags)만 매칭 (본문은 과감히 제외!)
+    # 제목(title) 또는 태그(custom_tags)만 매칭
     if keyword:
         query = query.filter(
             or_(
                 Post.title.contains(keyword),
-                Post.custom_tags.contains(keyword)  # JSON 타입 검색 지원
+                Post.custom_tags.contains(keyword)
             )
         )
         
-    return query.order_by(Post.created_at.desc()).limit(limit).all()
+    results = query.order_by(Post.created_at.desc()).limit(limit).all()
+
+    # 5. 최종 조회 성공 여부 출력
+    print(f"📤 [DB QUERY END] 쿼리 최종 반환 게시글 수 : {len(results)}개")
+    if results:
+        print(f"   🚀 최종 반환 리스트 ID 목록: {[p.id for p in results]}")
+    print("═" * 60 + "\n")
+
+    return results
 
