@@ -190,7 +190,7 @@ async def generate_chat_response(messages: List[ChatMessage], db: Session) -> st
 
         try:
             response = await openai_client.chat.completions.create(
-                model="gpt-4o-mini",  # 💡 참고: gpt-5-mini는 아직 없으므로 유효한 모델명으로 수정 권장
+                model="gpt-5-mini",  # 💡 참고: gpt-5-mini는 아직 없으므로 유효한 모델명으로 수정 권장
                 messages=api_messages,
                 # response_format={"type": "text"}, # 스트리밍 시 충돌할 수 있으니 제외하는 것이 좋습니다.
                 max_completion_tokens=2500,
