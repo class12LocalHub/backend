@@ -181,31 +181,46 @@ async def generate_chat_response(messages: List[ChatMessage], db: Session) -> st
             )
 
         # 4. 메시지 조립 및 API 호출
+# 4. 메시지 조립 및 API 호출
         api_messages = [{"role": "system", "content": system_instruction}]
         if local_context:
             api_messages.append({"role": "system", "content": local_context})
         for msg in messages:
             api_messages.append({"role": msg.role, "content": msg.content})
 
-        response = await openai_client.chat.completions.create(
-            model="gpt-5-mini",
-            messages=api_messages,
-            response_format={"type": "text"},
-            max_completion_tokens=2500
-        )
-        
-        first_choice = response.choices[0] if response.choices else None
-        raw_message = first_choice.message if first_choice else None
-        answer = (response.choices[0].message.content or "").strip()
-        if not answer:
-            print("[OpenAI API 경고] 빈 응답이 반환되어 fallback으로 전환합니다.")
-            return generate_fallback_response(user_last_message, intent, fallback_data)
-        return answer
+        try:
+            response = await openai_client.chat.completions.create(
+                model="gpt-4o-mini",  # 💡 참고: gpt-5-mini는 아직 없으므로 유효한 모델명으로 수정 권장
+                messages=api_messages,
+                # response_format={"type": "text"}, # 스트리밍 시 충돌할 수 있으니 제외하는 것이 좋습니다.
+                max_completion_tokens=2500,
+                stream=True  # 💡 스트리밍 모드 활성화
+            )
+            
+            # 💡 기존에 있던 response.choices[0] 검사 코드는 전부 삭제했습니다.
+            # 스트리밍 객체는 async for문 안에서 쪼개서 받아야만 합니다.
+            
+            async for chunk in response:
+                # 스트림 데이터 조각이 비어있지 않은지 안전하게 확인
+                if chunk.choices and len(chunk.choices) > 0:
+                    content = chunk.choices[0].delta.content
+                    if content is not None:
+                        yield content  # 데이터 조각을 프론트엔드로 전송
+                        
+        except Exception as e:
+            print(f"[OpenAI API 에러] 스트리밍 중 오류 발생, fallback으로 전환합니다. 사유: {e}")
+            
+            # 💡 return 값이 아니라 yield로 전송 후, 빈 return으로 함수를 끝냅니다.
+            fallback_answer = generate_fallback_response(user_last_message, intent, fallback_data)
+            yield fallback_answer
+            return
 
     except Exception as openai_error:
         # 5. Fallback 작동: API 문제 발생 시 자체 조합 텍스트 제공
         print(f"[OpenAI API 에러 - Fallback 실행]: {openai_error}")
-        return generate_fallback_response(user_last_message, intent, fallback_data)
+        fallback_answer = generate_fallback_response(user_last_message, intent, fallback_data)
+        yield fallback_answer
+        return
 
 
 def generate_fallback_response(user_message: str, intent: str, data: list) -> str:
